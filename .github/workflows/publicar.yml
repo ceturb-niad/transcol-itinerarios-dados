@@ -1,0 +1,91 @@
+name: Publicar itinerários
+
+on:
+  schedule:
+    # 12:15 e 00:15 de Brasília (UTC-3, sem horário de verão). Cron roda em UTC
+    # e só dispara no branch padrão.
+    - cron: "15 3,15 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publicar-itinerarios
+  cancel-in-progress: false
+
+jobs:
+  construir:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Testes do conversor
+        run: python -m unittest discover -s tests
+
+      - name: Baixar o KML publicado
+        env:
+          KML_URL: ${{ vars.KML_URL }}
+        run: |
+          if [ -z "$KML_URL" ]; then
+            echo "::error::Variável de repositório KML_URL não definida."
+            exit 1
+          fi
+          curl --fail --silent --show-error --location \
+               --retry 3 --retry-delay 5 \
+               "$KML_URL" --output itinerarios.kml
+
+      - name: Converter e validar
+        run: python scripts/converter.py --kml itinerarios.kml --saida _site --estado manifest.json
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      # Estado a registrar no repositório só depois que o deploy der certo.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: estado
+          path: manifest.json
+
+  publicar:
+    needs: construir
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
+
+  registrar-estado:
+    needs: publicar
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: estado
+          path: .
+
+      - name: Commitar manifest.json se mudou
+        run: |
+          if [ -z "$(git status --porcelain -- manifest.json)" ]; then
+            echo "KML sem mudança; nada a commitar."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add manifest.json
+          git commit -m "Atualiza manifest.json (KML mudou)"
+          git push
