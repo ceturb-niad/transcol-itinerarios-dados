@@ -1,64 +1,52 @@
-# Dados dos itinerários Transcol GV
+# Itinerários Transcol GV: dados em GeoJSON
 
-Converte o KML de itinerários (editado no Google Earth e publicado em outro repositório) em GeoJSON e o publica no GitHub Pages, duas vezes por dia. O front lê o resultado; este repositório não tem interface.
+GeoJSON dos itinerários das linhas do Transcol GV, gerado automaticamente a partir do KML de itinerários mantido pela CETURB/ES e atualizado duas vezes por dia.
 
-Documento do projeto: *Visualizador web de itinerários Transcol GV: aplicação V1 (piloto)*.
+## Como acessar
 
-## URLs estáveis
-
-- `https://<organização>.github.io/<este-repositório>/itinerarios.geojson`
-- `https://<organização>.github.io/<este-repositório>/manifest.json`
-
-## Contrato de dados
-
-GeoJSON `FeatureCollection` de `LineString` em 2D (sem Z), coordenadas com 6 casas decimais, vértices consecutivos repetidos removidos. A pasta raiz do KML (hoje com nome de data, ex.: `18_10_2026`) **não** entra nos atributos; o nome dela vai para `versao_kml` no manifesto.
-
-| Campo | Exemplo | Regra |
-| --- | --- | --- |
-| `caminho` | `Noturno/Cariacica/735_TST` | pastas sob a raiz, separadas por `/`; vazio se o placemark estiver direto na raiz |
-| `grupo` | `Noturno` | primeira pasta sob a raiz; mistura município e tipo de serviço |
-| `subgrupo` | `Cariacica` | segunda pasta, só quando há três níveis (Noturno, Praias); senão nulo |
-| `pasta_linha` | `735_TST` | pasta mais interna quando há pelo menos grupo e pasta; nulo em Volta Direto e Bike GV |
-| `linha` | `735_TST` | `pasta_linha`, ou `codigo` se não houver pasta, ou `nome` como último recurso |
-| `nome` | `735I_P` | nome do placemark |
-| `codigo` | `735` | dígitos iniciais do nome |
-| `sentido` | `I` ou `V` | letra após os dígitos |
-| `variante` | `P` | sufixo após `_` |
-| `obs` | `Pleno Voo` | texto entre parênteses no nome |
-| `chave` | `Noturno/Cariacica/735_TST/735I_P` | `caminho/nome`; identificador da feature; `#2`, `#3` se houver nome repetido na mesma pasta |
-
-Identidade de uma linha: o par (`grupo`, `linha`). Só `linha` não basta: em 4 casos (4216, 649, 675, 697) o mesmo valor aparece em `Volta Direto` e em outro grupo.
-
-Manifesto: `dados_atualizados_em`, `verificado_em` (ambos em UTC, ISO 8601), `hash_origem` (SHA-256 do KML), `n_features`, `versao_kml`.
-
-Mudanças no contrato são aditivas: campo novo pode; renomear ou remover não pode. Se uma quebra for inevitável, publica-se `itinerarios_v2.geojson` ao lado do atual.
-
-## Como funciona
-
-1. `schedule` (12:15 e 00:15 de Brasília) ou disparo manual.
-2. Baixa o KML da URL em `vars.KML_URL`.
-3. `scripts/converter.py` converte e valida (GeoJSON válido, ao menos uma feature, campos obrigatórios). Qualquer falha encerra com erro: nada é publicado e o Pages mantém o último deploy bom.
-4. Publica `_site/` (GeoJSON e manifesto, com `verificado_em` atualizado) no Pages.
-5. Só depois do deploy, se o hash do KML mudou, commita `manifest.json` na raiz. Esse arquivo guarda o hash anterior e a data dos dados; sem ele a data não sobrevive entre execuções.
-
-O conversor usa só a biblioteca padrão do Python. Não há GDAL.
-
-## Configuração inicial (uma vez, pela conta do administrador)
-
-1. Criar o repositório na organização e subir estes arquivos no branch padrão.
-2. Settings > Pages > Source: **GitHub Actions**.
-3. Settings > Secrets and variables > Actions > Variables: criar `KML_URL` com a URL pública do KML no Pages do repositório de origem.
-4. Criar o workflow e alterar o cron sempre com a conta que deve receber o e-mail de falha, e manter as notificações do Actions ativas nela.
-5. Rodar o workflow manualmente (Actions > Publicar itinerários > Run workflow) e conferir as duas URLs.
-
-Se o repositório ficar 60 dias sem atividade, o GitHub desativa o agendamento. O commit do `manifest.json` conta como atividade, mas só ocorre quando o KML muda. A defesa é o `verificado_em` visível no front.
-
-## Desenvolvimento local (VS Code no WSL2/Ubuntu)
-
-```bash
-python3 --version                       # 3.10 ou superior
-python -m unittest discover -s tests -v
-python scripts/converter.py --kml caminho/para/itinerarios.kml --saida _site --estado /tmp/estado.json
+```
+https://ceturb-niad.github.io/transcol-itinerarios-dados/itinerarios.geojson
+https://ceturb-niad.github.io/transcol-itinerarios-dados/manifest.json
 ```
 
-Em execução local, aponte `--estado` para fora do repositório (por exemplo `/tmp/estado.json`), para não criar um `manifest.json` que o workflow depois trataria como estado.
+São arquivos estáticos: um `GET` devolve o arquivo inteiro (cerca de 9 MB) e qualquer filtro é feito por quem consome.
+
+```bash
+curl -O https://ceturb-niad.github.io/transcol-itinerarios-dados/itinerarios.geojson
+```
+
+## Atualização
+
+O GeoJSON é regenerado por volta das 12:15 e 00:15 (horário de Brasília). O horário pode atrasar, e o cache do navegador pode adiar a exibição por alguns minutos. O arquivo `manifest.json` informa o estado dos dados:
+
+| Campo | Significado |
+| --- | --- |
+| `dados_atualizados_em` | Quando o KML de origem mudou pela última vez (UTC, ISO 8601) |
+| `verificado_em` | Última verificação bem-sucedida (UTC) |
+| `hash_origem` | SHA-256 do KML de origem |
+| `n_features` | Número de features no GeoJSON |
+| `versao_kml` | Identificação da versão do KML de origem |
+
+`dados_atualizados_em` antigo com `verificado_em` recente significa que nada mudou no KML. Um `verificado_em` parado há mais de um dia indica que a atualização está interrompida.
+
+## Formato dos dados
+
+`FeatureCollection` de `LineString`, em longitude e latitude (graus, WGS 84), sem altitude, com 6 casas decimais. Cada feature é um trecho de itinerário (ida ou volta, ou uma variante).
+
+| Campo | Exemplo | Descrição |
+| --- | --- | --- |
+| `caminho` | `Noturno/Cariacica/735_TST` | Pastas de origem, separadas por `/` |
+| `grupo` | `Noturno` | Primeiro nível de organização; mistura município e tipo de serviço |
+| `subgrupo` | `Cariacica` | Segundo nível, quando existe; senão nulo |
+| `pasta_linha` | `735_TST` | Pasta da linha, quando existe; senão nulo |
+| `linha` | `735_TST` | Identificador da linha |
+| `nome` | `735I_P` | Nome do itinerário |
+| `codigo` | `735` | Código numérico |
+| `sentido` | `I` ou `V` | Ida ou volta |
+| `variante` | `P` | Variante do itinerário, quando existe |
+| `obs` | `Pleno Voo` | Observação, quando existe |
+| `chave` | `Noturno/Cariacica/735_TST/735I_P` | Identificador único da feature |
+
+Para identificar uma linha, use o par `grupo` e `linha`: em alguns casos o mesmo valor de `linha` aparece em grupos diferentes.
+
+Novos campos podem ser acrescentados ao longo do tempo; os existentes não são renomeados nem removidos.
